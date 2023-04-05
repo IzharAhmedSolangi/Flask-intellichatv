@@ -1,0 +1,232 @@
+# A very simple Flask Hello World app for you to get started with...
+import datetime
+from flask import Flask, render_template, redirect, request
+from form import QuestionForm  #form inport for use
+import pprint
+import pinecone
+from tqdm.auto import tqdm  # progress bar
+import openai
+import os
+# import torch
+import pandas as pd
+#import the sentance tranformer
+from sentence_transformers import SentenceTransformer
+from datasets import load_dataset
+
+# Load the Datasets from Hugginface
+
+training_data = load_dataset(
+    "SoapEffect/onepos-v1-2",
+    split="train",
+    streaming=True,
+    
+    )
+
+
+
+# connect to pinecone environment
+pinecone.init(
+    api_key="0a877c21-26da-4720-9add-5543ac82324d",
+    # api_key="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",
+    environment="us-west1-gcp"
+)
+app = Flask(__name__)
+app.config ['SECRET_KEY'] = 'baseball23'
+
+@app.route('/', methods=['GET', 'POST'])
+def home():
+
+    # COMPLETIONS_MODEL = "text-davinci-003"
+    # #initially define anser variable as empty
+    # answer = ''
+    # response = '' 
+    # query = ''
+    # reference = ''
+    # FormQuestion = ''
+
+    form = QuestionForm()
+
+    # if form.is_submitted():
+    #     global context
+    #     global result
+        # FormQuestion = request.form.get("question")
+        # query = FormQuestion
+
+        # result = query_pinecone(query, top_k=1)
+        # query, section_titles = format_query(query, result["matches"])
+
+
+        # prompt = "Answer the question as truthfully as possible using the provided text, and if the answer is not contained within the text below, say 'I don't know'"
+        # prompt += "context:"
+        # prompt += query
+        # prompt += "Q:" + FormQuestion
+        # prompt += """A:"""
+
+        # response = openai.Completion.create(
+        #     prompt=prompt,
+        #     temperature=0,
+        #     max_tokens=300,
+        #     top_p=1,
+        #     frequency_penalty=0,
+        #     presence_penalty=0,
+        #     model=COMPLETIONS_MODEL
+        # )["choices"][0]["text"].strip(" \n")
+
+    return render_template('home.html', form=form)
+    # , manswer=response, context=query, mquestion=FormQuestion)
+
+
+openai.organization = "org-4uB5h7KacyP3NfRfYyzpLB3E"
+# get this from top-right dropdown on OpenAI under organization > settings
+# openai.api_key = "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"
+openai.api_key = "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"
+# get API key from top-right dropdown on OpenAI website
+
+total_doc_count = 133
+
+counter = 0
+docs = []
+
+# iterate through the dataset and apply our filter
+for d in tqdm(training_data, total=total_doc_count):
+
+    # extract the fields we need
+    doc = {
+        "data_id": d["ID"],
+        "data_title": d["TITLE"],
+        "data_href": d["HREF"],
+        "data_content": d["CONTENT"],
+        "data_video": d["VIDEO"]
+    }
+    # add the dict containing fields we need to docs list
+    docs.append(doc)
+
+    # stop iteration once we reach 50k
+    if counter == total_doc_count:
+        break
+
+    # increase the counter on every iteration
+    counter += 1
+
+# create a pandas dataframe with the documents we extracted
+df = pd.DataFrame(docs)
+df.head()
+
+# begining the fun stuff
+index_name = "abstractive-question-answering"
+
+# check if the abstractive-question-answering index exists
+if index_name not in pinecone.list_indexes():
+    # create the index if it does not exist
+    pinecone.create_index(
+        index_name,
+        dimension=768,
+        metric="cosine"
+    )
+
+# connect to abstractive-question-answering index we created
+
+index = pinecone.Index(index_name)
+retriever = SentenceTransformer("flax-sentence-embeddings/all_datasets_v3_mpnet-base")
+retriever
+
+df.iloc[:132].to_dict(orient="records")
+
+# we will use batches of 64
+batch_size = 64
+
+for i in tqdm(range(0, len(df), batch_size)):
+    # find end of batch
+    i_end = min(i+batch_size, len(df))
+    # extract batch
+    batch = df.iloc[i:i_end]
+    # generate embeddings for batch
+    emb = retriever.encode(batch["data_content"].tolist()).tolist()
+    # get metadata
+    meta = batch.to_dict(orient="records")
+    # create unique IDs
+    ids = [f"{idx}" for idx in range(i, i_end)]
+    # add all to upsert list
+    to_upsert = list(zip(ids, emb, meta))
+    # upsert/insert these records to pinecone
+    _ = index.upsert(vectors=to_upsert)
+
+# check that we have all vectors in index
+index.describe_index_stats()
+
+
+@app.route('/ajax', methods=['POST'])
+def ajax():
+
+    # openai.Engine.list()  # check we have authenticated
+
+
+    def query_pinecone(query, top_k):
+        # generate embeddings for the query
+        xq = retriever.encode([query]).tolist()
+        # search pinecone index for context passage with the answer
+        xc = index.query(xq, top_k=top_k, include_metadata=True)
+        return xc
+
+    def format_query(query, input):
+        # extract passage_text from Pinecone search result and add the <P> tag
+        context = [f"{m['metadata']['data_content']}" for m in input]
+        reference = [f"{m['metadata']['data_href']}" for m in input]
+
+        # concatinate all context passages
+        context = " ".join(context)
+        # contcatinate the query and context passages
+        query = f"{context}"
+        return query, reference
+
+    COMPLETIONS_MODEL = "text-davinci-003"
+    # reference = ""
+    question = request.form.get('question')
+    query = question
+    result = query_pinecone(query, top_k=1)
+    query, reference = format_query(query, result["matches"])
+
+    if 'response' in locals():
+        #check if there has been a previous prompt
+        if 'previousResponse' in locals():
+            prompt = previousResponse
+            prompt += response
+            prompt += 'You:' + question
+
+    else:
+        prompt = 'Answer the question as truthfully as possible using the provided context, and if the answer is not contained within the text below, say “Sorry, I don’t know”'
+        prompt += 'Context:' + query
+        prompt += 'You: Hello, how are you?'
+        prompt += 'AI: I am excellent today. Thank you for asking. How can I help you today?'
+        prompt += 'You:' + question
+
+    previousResponse = prompt
+
+    response = openai.Completion.create(
+            prompt=prompt,
+            temperature=0,
+            max_tokens=300,
+            top_p=1,
+            frequency_penalty=0,
+            presence_penalty=0,
+            model=COMPLETIONS_MODEL
+        )["choices"][0]["text"].strip(" \n")
+    response = response + '<br/><br/>'
+    
+    #strip variable called reference of the brackets and wrap in a link
+    reference = str(reference).strip('[]')
+    reference = f'<a href="{reference}">{reference}</a><br/><br/>'
+
+    return f'{response} You may find more infromation at this link: {reference} Please take a moment to review my response and let me know what further questions you have.'
+
+
+
+@app.route('/about')
+def about():
+    return render_template('about.html', todaydate = datetime.datetime.now())
+
+
+if __name__ == '__main__':
+    app.run(host='0.0.0.0', port=5000
+    , debug=True
+    )

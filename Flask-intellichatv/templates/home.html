@@ -1,0 +1,94 @@
+<!DOCTYPE html>
+<html>
+    <head>
+        <title>Page Title</title>
+
+        <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+
+        <!-- Latest compiled and minified CSS -->
+        <link rel="stylesheet" href="https://maxcdn.bootstrapcdn.com/bootstrap/3.4.1/css/bootstrap.min.css">
+
+        <!-- jQuery library -->
+        <script src="https://ajax.googleapis.com/ajax/libs/jquery/3.6.1/jquery.min.js"></script>
+
+        <!-- Latest compiled JavaScript -->
+        <script src="https://maxcdn.bootstrapcdn.com/bootstrap/3.4.1/js/bootstrap.min.js"></script>
+
+    </head>
+
+    <body>
+        <div class="container-fluid main">
+            <div class="row main-row">
+                <div class="col-xs-4 col-sm-4 col-md-4 col-lg-4 settings-container">
+                    <h1 class="text-light">Ai Support</h1>
+                    <p class="text-light">Ask a question using plain english. Our Ai has been trained using onePOS knowledge base and technical manuals to provide you the best answer as quickly as possible.</p>
+                </div><!-- end left colmn settings container -->
+
+                <div class="col-xs-8 col-sm-8 col-md-8 col-lg-8 chat-container">
+
+                    <div class="questions"
+                    </div>
+
+                    <form style="clear: both;" action="" method="post">
+                        <p>Ask your question:<br/>
+                        {{form.question(size=30)}}
+                        </p>
+                        <p>{{form.submit(class_="button")}}<br/>
+                        </p>
+                    </form>
+
+                    <script>
+
+                        var questionBox = $('input#question')
+                        var questions = $('.questions')
+
+                        var loading = document.createElement('span')
+                        loading.className = 'loading'
+                        loading.innerHTML = 'Loading...'
+                            
+                        questionBox.after(loading)
+
+                        $('input.button').attr({type: 'button'})
+                        .on('click', function() {
+                            var question = questionBox.val()
+                            var questionBubble = document.createElement('p')
+                            $(questionBubble).addClass('question-bubble')
+                            .html(question)
+                            questions.append(questionBubble)
+
+                            $(loading).show()
+
+                            $.ajax({
+                                type: 'POST',
+                                url: '/ajax',
+                                data: {
+                                    question: question,
+                                },
+                                success: (response) => {
+                                    var answerBubble = document.createElement('p')
+                                    $(answerBubble).addClass('answer-bubble')
+                                    .html(response)
+
+                                    questions.append(answerBubble)
+                                    questionBox.val('')
+
+                                    $(loading).hide()
+                                },
+                            })
+
+                        })
+                        
+                        questionBox.on('keydown', function(e) {
+                            if (e.which == 13) {
+                                e.preventDefault()
+                                $('input.button').click()
+                                questionBox.blur()
+                            }
+                        })
+
+                    </script>
+                </div><!-- end chat right column chat area -->
+            </div><!-- end row -->
+        </div> <!-- end container -->
+    </body>
+</html>
